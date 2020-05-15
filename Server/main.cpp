@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
 	SOCKET clientSocket = INVALID_SOCKET;
 	SOCKET clientSockets[] = { INVALID_SOCKET , INVALID_SOCKET , INVALID_SOCKET };
 
-	WSAPOLLFD pollFds[3];
+	WSAPOLLFD pollFds[4];
 
 	string answer;
 
@@ -86,8 +86,11 @@ int main(int argc, char** argv) {
 
 	freeaddrinfo(result);
 
-	for (int i = 0; i < 4; i++) {
-		pollFds[i].fd = serverSocket;
+	pollFds[0].fd = serverSocket;
+	pollFds[0].events = POLLRDNORM;
+	for (int i = 1; i < 4; i++) {
+		pollFds[i].fd = clientSockets[i-1];
+		pollFds[i].events = POLLIN;
 	}
 
 	iRes = listen(serverSocket, SOMAXCONN);
@@ -99,9 +102,22 @@ int main(int argc, char** argv) {
 
 	printf("Waiting for connection...\n");
 
-	WSAPoll(pollFds, 2, -1);
+	while (1) {
+		WSAPoll(pollFds, 4, -1);
 
-	do {
+		if (pollFds[0].revents == POLLRDNORM) {
+			clientSocket = accept(serverSocket, NULL, NULL);
+			if (clientSocket == INVALID_SOCKET) {
+				printf("Accept failed\n");
+				closesocket(serverSocket);
+				return 1;
+			}
+			printf("Connection accepted\n");
+		}
+
+	}
+
+	/*do {
 		clientSocket = accept(serverSocket, NULL, NULL);
 		if (clientSocket == INVALID_SOCKET) {
 			printf("Accept failed\n");
@@ -119,7 +135,7 @@ int main(int argc, char** argv) {
 		cout << "\n\nSluchac dalej ? \n";
 		cin >> answer;
 
-	} while (!answer.compare("tak"));
+	} while (!answer.compare("tak"));*/
 	
 	closesocket(serverSocket);
 
