@@ -44,11 +44,11 @@ int main(int argc, char** argv) {
 	memset(&hints, 0, sizeof(hints));
 	memset(&result, 0, sizeof(result));
 
-	SOCKET serverSocket = INVALID_SOCKET;
-	SOCKET clientSocket = INVALID_SOCKET;
+	SOCKET serverSocket = INVALID_SOCKET, clientSocket = INVALID_SOCKET;
+	SOCKET placeHolderSocket = INVALID_SOCKET;
 	SOCKET clientSockets[] = { INVALID_SOCKET , INVALID_SOCKET , INVALID_SOCKET };
 
-	WSAPOLLFD pollFds[3];
+	WSAPOLLFD pollFds[4];
 
 	string answer;
 
@@ -86,8 +86,11 @@ int main(int argc, char** argv) {
 
 	freeaddrinfo(result);
 
-	for (int i = 0; i < 4; i++) {
-		pollFds[i].fd = serverSocket;
+	pollFds[0].fd = serverSocket;
+	pollFds[0].events = POLLRDNORM;
+	for (int i = 1; i < 4; i++) {
+		pollFds[i].fd = clientSockets[i-1];
+		pollFds[i].events = POLLIN;
 	}
 
 	iRes = listen(serverSocket, SOMAXCONN);
@@ -99,9 +102,51 @@ int main(int argc, char** argv) {
 
 	printf("Waiting for connection...\n");
 
-	WSAPoll(pollFds, 2, -1);
+	while (1) {
+		
+		WSAPoll(pollFds, 4, -1);
 
-	do {
+		for (int i = 0; i < 4; i++) {
+			if (i == 0 && pollFds[i].revents == POLLRDNORM) {
+				placeHolderSocket = accept(serverSocket, NULL, NULL);
+				if (placeHolderSocket == INVALID_SOCKET) {
+					printf("Accept failed\n");
+					closesocket(serverSocket);
+					return 1;
+				}
+
+				printf("Connection accepted...");
+				
+				for (int i = 1; i < 4; i++) {
+					if (pollFds[i].fd == INVALID_SOCKET) {
+						pollFds[i].fd = placeHolderSocket;
+						printf(" and passed to the new client socket\n");
+						send(pollFds[i].fd, "Hi", 2, 0);
+						break;
+					}
+				}
+			}
+			else if (pollFds[i].revents == POLLRDNORM) {
+				memset(&buffer, 0, BUFFER_LEN);
+				iRes = recv(pollFds[i].fd, buffer, BUFFER_LEN, 0);
+				if (iRes > 0) {
+					printf("Msg from client no. %d : %s\n",i , buffer);
+				}
+				else if (iRes == 0) {
+					printf("Connection closed\n");
+				}
+				send(pollFds[i].fd, "OK", 2, 0);
+			}
+			else if (pollFds[i].revents == POLLHUP) {
+					printf("Msg from client no. %d : Connection closed\n", i);
+					pollFds[i].fd = INVALID_SOCKET;
+			}
+			
+		}
+
+	}
+
+	/*do {
 		clientSocket = accept(serverSocket, NULL, NULL);
 		if (clientSocket == INVALID_SOCKET) {
 			printf("Accept failed\n");
@@ -119,7 +164,7 @@ int main(int argc, char** argv) {
 		cout << "\n\nSluchac dalej ? \n";
 		cin >> answer;
 
-	} while (!answer.compare("tak"));
+	} while (!answer.compare("tak"));*/
 	
 	closesocket(serverSocket);
 
