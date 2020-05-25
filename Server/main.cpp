@@ -15,6 +15,33 @@ using namespace std;
 
 #define PORT 27047
 #define BUFFER_LEN 2048
+#define MAX_SOCK 3
+
+typedef struct SOCKETS {
+	SOCKET serverSocket;
+	SOCKET placeHolderSocket;
+} SOCKETS, *LPSOCKETS;
+
+typedef class PORT_NO {
+private:
+	unsigned int no;
+public:
+	PORT_NO() : no(0) {};
+	PORT_NO(unsigned int port) {
+		no = port;
+	}
+	void setPortNo(unsigned int port) {
+		no = port;
+	}
+	unsigned int getPortNo() {
+		return no;
+	}
+	string getPortNoAsChar() {
+		stringstream ss;
+		ss << no;
+		return ss.str();
+	}
+} PORT_NO, *LPPORT_NO;
 
 void serverService(SOCKET s, char* buf) {
 	int iRes;
@@ -32,10 +59,10 @@ void serverService(SOCKET s, char* buf) {
 int main(int argc, char** argv) {
 
 	int iRes;
-	stringstream ss;
-	ss << PORT;
-	string portNumStr = ss.str();
-	char* portNumChar = (char*)portNumStr.c_str();
+
+	char buffer[BUFFER_LEN];
+
+	PORT_NO port(PORT);
 
 	WSAData wsaData;
 	WORD version = MAKEWORD(2, 1);
@@ -44,15 +71,10 @@ int main(int argc, char** argv) {
 	memset(&hints, 0, sizeof(hints));
 	memset(&result, 0, sizeof(result));
 
-	SOCKET serverSocket = INVALID_SOCKET, clientSocket = INVALID_SOCKET;
-	SOCKET placeHolderSocket = INVALID_SOCKET;
-	SOCKET clientSockets[] = { INVALID_SOCKET , INVALID_SOCKET , INVALID_SOCKET };
+	WSAPOLLFD pollFds[MAX_SOCK+1];
 
-	WSAPOLLFD pollFds[4];
-
-	string answer;
-
-	char buffer[BUFFER_LEN];
+	LPSOCKETS sockets;
+	sockets = (LPSOCKETS)GlobalAlloc(GPTR, sizeof(sockets));
 
 	iRes = WSAStartup(version, &wsaData);
 	if (iRes != 0) {
@@ -64,39 +86,40 @@ int main(int argc, char** argv) {
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	iRes = getaddrinfo(NULL, portNumChar, &hints, &result);
+	iRes = getaddrinfo(NULL, port.getPortNoAsChar().c_str(), &hints, &result);
 	if (iRes != 0) {
 		printf("Cos nie tak z getaddrinfo\n");
 		return 1;
 	}
 
-	serverSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-	if (serverSocket == INVALID_SOCKET) {
+	sockets->serverSocket = WSASocket(result->ai_family, result->ai_socktype, result->ai_protocol,
+		NULL, 0, WSA_FLAG_OVERLAPPED);
+	if (sockets->serverSocket == INVALID_SOCKET) {
 		printf("Error creating socket\n");
 		return 1;
 	}
 
-	iRes = bind(serverSocket, result->ai_addr, (int)result->ai_addrlen);
+	iRes = bind(sockets->serverSocket, result->ai_addr, (int)result->ai_addrlen);
 	if (iRes != 0) {
 		printf("Bind failed\n");
 		freeaddrinfo(result);
-		closesocket(serverSocket);
+		closesocket(sockets->serverSocket);
 		return 1;
 	}
 
 	freeaddrinfo(result);
 
-	pollFds[0].fd = serverSocket;
+	pollFds[0].fd = sockets->serverSocket;
 	pollFds[0].events = POLLRDNORM;
 	for (int i = 1; i < 4; i++) {
-		pollFds[i].fd = clientSockets[i-1];
+		pollFds[i].fd = INVALID_SOCKET;
 		pollFds[i].events = POLLIN;
 	}
 
-	iRes = listen(serverSocket, SOMAXCONN);
+	iRes = listen(sockets->serverSocket, SOMAXCONN);
 	if (iRes != 0) {
 		printf("Problem listening");
-		closesocket(serverSocket);
+		closesocket(sockets->serverSocket);
 		return 1;
 	}
 
@@ -108,18 +131,18 @@ int main(int argc, char** argv) {
 
 		for (int i = 0; i < 4; i++) {
 			if (i == 0 && pollFds[i].revents == POLLRDNORM) {
-				placeHolderSocket = accept(serverSocket, NULL, NULL);
-				if (placeHolderSocket == INVALID_SOCKET) {
+				sockets->placeHolderSocket = accept(sockets->serverSocket, NULL, NULL);
+				if (sockets->placeHolderSocket == INVALID_SOCKET) {
 					printf("Accept failed\n");
-					closesocket(serverSocket);
+					closesocket(sockets->serverSocket);
 					return 1;
 				}
 
 				printf("Connection accepted...");
-				
+
 				for (int i = 1; i < 4; i++) {
 					if (pollFds[i].fd == INVALID_SOCKET) {
-						pollFds[i].fd = placeHolderSocket;
+						pollFds[i].fd = sockets->placeHolderSocket;
 						printf(" and passed to the new client socket\n");
 						send(pollFds[i].fd, "Hi", 2, 0);
 						break;
@@ -145,31 +168,8 @@ int main(int argc, char** argv) {
 		}
 
 	}
-
-	/*do {
-		clientSocket = accept(serverSocket, NULL, NULL);
-		if (clientSocket == INVALID_SOCKET) {
-			printf("Accept failed\n");
-			closesocket(serverSocket);
-			return 1;
-		}
-
-		printf("Connection accepted, closing serverSocket\n");
-
-		iRes = send(clientSocket, "No siema", (int)strlen("No siema"), 0);
-
-		memset(&buffer, 0, sizeof(buffer));
-		serverService(clientSocket, buffer);
-
-		cout << "\n\nSluchac dalej ? \n";
-		cin >> answer;
-
-	} while (!answer.compare("tak"));*/
 	
-	closesocket(serverSocket);
-
-	iRes = shutdown(clientSocket, SD_BOTH);
-	closesocket(clientSocket);
+	closesocket(sockets->serverSocket);
 	WSACleanup();
 
 	return 0;
